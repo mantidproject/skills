@@ -7,8 +7,9 @@
 
 set -euo pipefail
 
-MAIN_REF="upstream/main"
-ORNL_REF="upstream/ornl-next"
+REMOTE="${ORNL_REMOTE:-}"
+MAIN_REF=""
+ORNL_REF=""
 MODE="diff"
 SINCE=""
 
@@ -16,13 +17,22 @@ usage() {
     cat <<'USAGE'
 Usage: check-paths.sh [options]
 
-  --main REF     ref holding upstream main       (default: upstream/main)
-  --ornl REF     ref holding the ornl-next work  (default: upstream/ornl-next)
+  --remote NAME  git remote holding the mantidproject repository. Defaults to
+                 $ORNL_REMOTE, else the remote whose URL is mantidproject/mantid,
+                 else "upstream".
+  --main REF     full ref for upstream main       (default: <remote>/main)
+  --ornl REF     full ref for the ornl-next work  (default: <remote>/ornl-next)
   --log          list upstream commits touching the config paths instead of
                  listing differing files
-  --since REF    with --log, start from REF      (default: last full release tag)
+  --since REF    with --log, start from REF       (default: last full release tag)
   --paths        print the path list and exit
+  --remotes      print candidate remotes and which one would be used, then exit
   -h, --help     this message
+
+--main and --ornl are complete refs and override --remote for that branch,
+so a local or contributor branch can be checked directly:
+
+  check-paths.sh --ornl my-reconciliation-branch
 
 Exit status: 0 if the config paths are in sync, 1 if they differ.
 USAGE
@@ -30,17 +40,71 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --main)  MAIN_REF="$2"; shift 2 ;;
-        --ornl)  ORNL_REF="$2"; shift 2 ;;
-        --since) SINCE="$2"; shift 2 ;;
-        --log)   MODE="log"; shift ;;
-        --paths) MODE="paths"; shift ;;
+        --remote)  REMOTE="$2"; shift 2 ;;
+        --main)    MAIN_REF="$2"; shift 2 ;;
+        --ornl)    ORNL_REF="$2"; shift 2 ;;
+        --since)   SINCE="$2"; shift 2 ;;
+        --log)     MODE="log"; shift ;;
+        --paths)   MODE="paths"; shift ;;
+        --remotes) MODE="remotes"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
 
 cd "$(git rev-parse --show-toplevel)"
+
+# Remotes pointing at the canonical repository, over ssh or https, with or
+# without a .git suffix. Contributor forks are deliberately not matched.
+mantid_remotes() {
+    git remote -v \
+        | awk '$3 == "(fetch)" && $2 ~ /[:\/]mantidproject\/mantid(\.git)?$/ { print $1 }' \
+        | sort -u
+}
+
+resolve_remote() {
+    if [[ -n "$REMOTE" ]]; then
+        if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
+            echo "no such git remote: ${REMOTE}" >&2
+            echo "available remotes: $(git remote | tr '\n' ' ')" >&2
+            exit 2
+        fi
+        echo "$REMOTE"; return
+    fi
+
+    local found
+    found="$(mantid_remotes | head -1)"
+    if [[ -n "$found" ]]; then echo "$found"; return; fi
+
+    if git remote get-url upstream >/dev/null 2>&1; then echo "upstream"; return; fi
+
+    echo "cannot determine which remote holds mantidproject/mantid." >&2
+    echo "available remotes: $(git remote | tr '\n' ' ')" >&2
+    echo "pass --remote NAME, or set ORNL_REMOTE." >&2
+    exit 2
+}
+
+if [[ "$MODE" == "remotes" ]]; then
+    echo "remotes matching mantidproject/mantid:"
+    mantid_remotes | sed 's/^/  /'
+    echo "would use: $(resolve_remote)"
+    exit 0
+fi
+
+# Only resolve a remote for the refs that were not given in full.
+if [[ -z "$MAIN_REF" || -z "$ORNL_REF" ]]; then
+    resolved="$(resolve_remote)"
+    : "${MAIN_REF:=${resolved}/main}"
+    : "${ORNL_REF:=${resolved}/ornl-next}"
+fi
+
+for ref in "$MAIN_REF" "$ORNL_REF"; do
+    git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null || {
+        echo "cannot resolve ref: ${ref}" >&2
+        echo "fetch first, or pass --remote / --main / --ornl." >&2
+        exit 2
+    }
+done
 
 # Build / CI / configuration surface that ornl-next must track from main.
 #
@@ -109,14 +173,12 @@ last_release_tag() {
 case "$MODE" in
     paths)
         printf '%s\n' "${PATHS[@]}"
-        exit 0
         ;;
     log)
         [[ -n "$SINCE" ]] || SINCE="$(last_release_tag)"
         echo "# commits on ${MAIN_REF} touching config paths since ${SINCE}" >&2
         git log --topo-order --reverse --format='%h %ad %s' --date=short \
             "${SINCE}..${MAIN_REF}" -- "${PATHS[@]}" | exclude
-        exit 0
         ;;
     diff)
         # Two explicit refs: compares committed trees only, so uncommitted work

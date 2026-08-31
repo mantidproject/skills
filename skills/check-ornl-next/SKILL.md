@@ -1,5 +1,6 @@
 ---
 name: check-ornl-next
+license: MIT
 description: Find and cherry-pick build, CI, and configuration commits from upstream/main onto an ornl-next branch of the Mantid repository. Use when asked to check for ornl-next commits, sync ornl-next with main, reconcile ORNL branch build configuration, or verify that an ornl-next branch still merges cleanly into main.
 ---
 
@@ -21,6 +22,34 @@ skill's own directory, normally `.claude/skills/check-ornl-next`:
 SKILL=.claude/skills/check-ornl-next
 ```
 
+## Choosing the git remote
+
+Remote naming is a local convention, so nothing here assumes `upstream`. The
+scripts resolve the remote in this order:
+
+1. `--remote NAME`, if given.
+2. `$ORNL_REMOTE`, if set.
+3. The remote whose fetch URL is `mantidproject/mantid`. Contributor forks are
+   not matched, so a checkout full of collaborator remotes still resolves.
+4. `upstream`, if it exists.
+
+If none apply the scripts stop and list the available remotes rather than
+guessing. To see what would be chosen:
+
+```sh
+"$SKILL"/scripts/check-paths.sh --remotes
+```
+
+If the user names a remote, pass it through with `--remote`. If detection fails,
+ask which remote tracks `mantidproject/mantid` rather than picking one.
+
+`--main` and `--ornl` take complete refs and override the remote for that branch,
+which is how you check a local or contributor branch:
+
+```sh
+"$SKILL"/scripts/check-paths.sh --ornl my-reconciliation-branch
+```
+
 Out of scope: ordinary science-code divergence. `main` is routinely ahead of
 `ornl-next` by dozens of source files; that is expected and is not this skill's
 concern.
@@ -39,10 +68,11 @@ concern.
 
 ## Procedure
 
-1. Fetch first. Every check below is meaningless against stale refs.
+1. Fetch first. Every check below is meaningless against stale refs. Use the
+   remote resolved above -- `git remote` if you are unsure which it is.
 
    ```sh
-   git fetch upstream
+   git fetch <remote>
    ```
 
 2. Ask what differs.
@@ -55,7 +85,7 @@ concern.
    Exit status 1 lists the configuration files that `main` has and `ornl-next`
    does not.
 
-   Both refs are overridable: `--main`, `--ornl`.
+   Add `--remote NAME` if the mantidproject remote is not auto-detected.
 
 3. Only if step 2 reported differences, find the commits responsible.
 
@@ -76,7 +106,7 @@ concern.
 
 ## Do not use ancestry to decide what is missing
 
-`git merge-base --is-ancestor <sha> upstream/ornl-next` is **not** a reliable
+`git merge-base --is-ancestor <sha> <remote>/ornl-next` is **not** a reliable
 test of whether an upstream change has been applied.
 
 `ornl-next` receives configuration through squashed roll-up pull requests
@@ -114,8 +144,8 @@ Check the second in a throwaway worktree so the working checkout is untouched:
 ```sh
 git worktree add ../verify-ornl HEAD
 cd ../verify-ornl
-git merge upstream/main
-git diff --name-only upstream/main   # must print nothing
+git merge <remote>/main
+git diff --name-only <remote>/main   # must print nothing
 cd -
 git worktree remove ../verify-ornl
 ```

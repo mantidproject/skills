@@ -11,18 +11,26 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="${HERE}/check-paths.sh"
 OUT="${HERE}/../reference/outstanding-commits.md"
 
-MAIN_REF="upstream/main"
-ORNL_REF="upstream/ornl-next"
+# Passed straight through to check-paths.sh, which owns remote resolution.
+CHECK_ARGS=()
+
+usage() {
+    cat <<'USAGE'
+Usage: regenerate-outstanding.sh [--remote NAME] [--main REF] [--ornl REF] [--out FILE]
+
+  --remote NAME  git remote holding mantidproject/mantid (default: auto-detect)
+  --main REF     full ref for upstream main
+  --ornl REF     full ref for the ornl-next work
+  --out FILE     where to write (default: ../reference/outstanding-commits.md)
+USAGE
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --main) MAIN_REF="$2"; shift 2 ;;
-        --ornl) ORNL_REF="$2"; shift 2 ;;
-        --out)  OUT="$2"; shift 2 ;;
-        -h|--help)
-            echo "Usage: regenerate-outstanding.sh [--main REF] [--ornl REF] [--out FILE]"
-            exit 0 ;;
-        *) echo "unknown option: $1" >&2; exit 2 ;;
+        --remote|--main|--ornl) CHECK_ARGS+=("$1" "$2"); shift 2 ;;
+        --out) OUT="$2"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
 
@@ -30,11 +38,15 @@ cd "$(git rev-parse --show-toplevel)"
 
 release="$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
 today="$(date +%Y-%m-%d)"
-main_sha="$(git rev-parse --short "$MAIN_REF")"
-ornl_sha="$(git rev-parse --short "$ORNL_REF")"
 
 in_sync=0
-differing="$("$CHECK" --main "$MAIN_REF" --ornl "$ORNL_REF")" || in_sync=1
+differing="$("$CHECK" "${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}")" || in_sync=1
+
+# The header line names the refs check-paths.sh actually resolved, so the
+# generated file records what was compared rather than what was requested.
+refs_line="$(printf '%s\n' "$differing" | head -1)"
+main_ref="$(sed -n 's/.*between .* and \(.*\)\.$/\1/p; s/^Configuration files on \(.*\) not yet.*$/\1/p' <<<"$refs_line" | head -1)"
+ornl_ref="$(sed -n 's/^In sync: .* between \(.*\) and .*\.$/\1/p; s/.*not yet reflected in \(.*\):$/\1/p' <<<"$refs_line" | head -1)"
 
 {
     echo "# Outstanding ornl-next configuration commits"
@@ -44,14 +56,14 @@ differing="$("$CHECK" --main "$MAIN_REF" --ornl "$ORNL_REF")" || in_sync=1
     echo "| | |"
     echo "|---|---|"
     echo "| baseline release | \`${release}\` |"
-    echo "| \`${MAIN_REF}\` | \`${main_sha}\` |"
-    echo "| \`${ORNL_REF}\` | \`${ornl_sha}\` |"
+    echo "| main ref | \`${main_ref}\` (\`$(git rev-parse --short "$main_ref")\`) |"
+    echo "| ornl-next ref | \`${ornl_ref}\` (\`$(git rev-parse --short "$ornl_ref")\`) |"
     echo
 
     if [[ $in_sync -eq 0 ]]; then
         echo "## Status: in sync"
         echo
-        echo "No configuration paths differ between \`${ORNL_REF}\` and \`${MAIN_REF}\`."
+        echo "No configuration paths differ between \`${ornl_ref}\` and \`${main_ref}\`."
         echo "There is nothing to cherry-pick."
     else
         echo "## Status: out of sync"
@@ -67,7 +79,7 @@ differing="$("$CHECK" --main "$MAIN_REF" --ornl "$ORNL_REF")" || in_sync=1
         echo
         echo "| commit | date | message |"
         echo "|--------|------|---------|"
-        "$CHECK" --main "$MAIN_REF" --ornl "$ORNL_REF" --log --since "$release" 2>/dev/null \
+        "$CHECK" "${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}" --log --since "$release" 2>/dev/null \
             | while read -r sha date msg; do
                 printf '| `%s` | %s | %s |\n' "$sha" "$date" "${msg//|/\\|}"
             done
