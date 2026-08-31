@@ -14,13 +14,23 @@ OUT="${HERE}/../reference/outstanding-commits.md"
 # Passed straight through to check-paths.sh, which owns remote resolution.
 CHECK_ARGS=()
 
+# Explicitly requested commits. These reach the commit table but deliberately
+# not the file diff: they are work to do on their own terms, not evidence that
+# a configuration path differs.
+INCLUDE_ARGS=()
+INCLUDE_SHAS=()
+
 usage() {
     cat <<'USAGE'
-Usage: regenerate-outstanding.sh [--remote NAME] [--main REF] [--ornl REF] [--out FILE]
+Usage: regenerate-outstanding.sh [--remote NAME] [--main REF] [--ornl REF]
+                                 [--include SHA] [--out FILE]
 
   --remote NAME  git remote holding mantidproject/mantid (default: auto-detect)
   --main REF     full ref for upstream main
   --ornl REF     full ref for the ornl-next work
+  --include SHA  commit to record as work to do whether or not it touches a
+                 configuration path. Repeatable, and accepts a comma-separated
+                 list.
   --out FILE     where to write (default: ../reference/outstanding-commits.md)
 USAGE
 }
@@ -28,6 +38,14 @@ USAGE
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --remote|--main|--ornl) CHECK_ARGS+=("$1" "$2"); shift 2 ;;
+        --include)
+            IFS=',' read -r -a _inc <<< "$2"
+            for _sha in "${_inc[@]}"; do
+                [[ -n "$_sha" ]] || continue
+                INCLUDE_ARGS+=(--include "$_sha")
+                INCLUDE_SHAS+=("$_sha")
+            done
+            shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -60,7 +78,7 @@ ornl_ref="$(sed -n 's/^In sync: .* between \(.*\) and .*\.$/\1/p; s/.*not yet re
     echo "| ornl-next ref | \`${ornl_ref}\` (\`$(git rev-parse --short "$ornl_ref")\`) |"
     echo
 
-    if [[ $in_sync -eq 0 ]]; then
+    if [[ $in_sync -eq 0 && ${#INCLUDE_SHAS[@]} -eq 0 ]]; then
         echo "## Status: in sync"
         echo
         echo "No configuration paths differ between \`${ornl_ref}\` and \`${main_ref}\`."
@@ -70,16 +88,32 @@ ornl_ref="$(sed -n 's/^In sync: .* between \(.*\) and .*\.$/\1/p; s/.*not yet re
         echo
         echo "### Differing files"
         echo
-        printf '%s\n' "$differing" | tail -n +2 | sed 's/^/- `/; s/$/`/'
+        if [[ $in_sync -eq 0 ]]; then
+            echo "None. The commits below were requested explicitly."
+        else
+            printf '%s\n' "$differing" | tail -n +2 | sed 's/^/- `/; s/$/`/'
+        fi
         echo
         echo "### Commits to consider, oldest first"
         echo
         echo "Cherry-pick in the order listed. Confirm each one is genuinely absent"
         echo "by content -- ancestry is not a reliable test, see SKILL.md."
+        if [[ ${#INCLUDE_SHAS[@]} -gt 0 ]]; then
+            joined=""
+            for _sha in "${INCLUDE_SHAS[@]}"; do
+                joined+=", \`$(git rev-parse --short "$_sha" 2>/dev/null || echo "$_sha")\`"
+            done
+            echo
+            echo "Requested explicitly: ${joined#, }. These are listed whether or"
+            echo "not they touch a configuration path, merged into the table in"
+            echo "topological order."
+        fi
         echo
         echo "| commit | date | message |"
         echo "|--------|------|---------|"
-        "$CHECK" "${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}" --log --since "$release" 2>/dev/null \
+        "$CHECK" "${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}" \
+                 "${INCLUDE_ARGS[@]+"${INCLUDE_ARGS[@]}"}" \
+                 --log --since "$release" 2>/dev/null \
             | while read -r sha date msg; do
                 printf '| `%s` | %s | %s |\n' "$sha" "$date" "${msg//|/\\|}"
             done

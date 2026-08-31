@@ -1,7 +1,7 @@
 ---
 name: check-ornl-next
 license: MIT
-description: Find and cherry-pick build, CI, and configuration commits from upstream/main onto an ornl-next branch of the Mantid repository. Use when asked to check for ornl-next commits, sync ornl-next with main, reconcile ORNL branch build configuration, or verify that an ornl-next branch still merges cleanly into main.
+description: Find and cherry-pick build, CI, and configuration commits from upstream/main onto an ornl-next branch of the Mantid repository. Optionally takes commit shas as arguments to carry over as well, whatever they touch. Use when asked to check for ornl-next commits, sync ornl-next with main, reconcile ORNL branch build configuration, or verify that an ornl-next branch still merges cleanly into main.
 ---
 
 # Check for ornl-next commits
@@ -54,6 +54,35 @@ Out of scope: ordinary science-code divergence. `main` is routinely ahead of
 `ornl-next` by dozens of source files; that is expected and is not this skill's
 concern.
 
+## Explicitly requested commits
+
+Any shas given as arguments to this skill are commits the user wants carried
+over whatever they touch -- typically a fix that lands outside the configuration
+surface. They are additional to the path diff, never a replacement for it.
+
+Pass each one through with `--include`, which is repeatable and also takes a
+comma-separated list. Both scripts accept it:
+
+```sh
+"$SKILL"/scripts/check-paths.sh --include 1a2b3c4 --include 5d6e7f8
+```
+
+Requested commits:
+
+- make step 2 report work to do even when the configuration paths are in sync,
+  so exit status 0 no longer means "nothing to do".
+- come back from `--log` merged into the topological order of the path commits,
+  so the listed order remains the order to cherry-pick in. One that predates the
+  baseline release, or is not in the range at all, is listed first.
+- are listed whether or not `ornl-next` already has their content. That question
+  belongs to the cherry-pick itself: if one applies empty, `git cherry-pick
+  --skip` it and say so in the report.
+
+A requested commit that is not an ancestor of `main` puts something on the
+branch that `main` does not have, which is exactly what verification 2 rejects.
+The scripts warn when they see one. Report that to the user rather than dropping
+the commit or skipping the check.
+
 ## Hard rules
 
 - Apply missing upstream changes with `git cherry-pick` **only**. Never recreate
@@ -85,7 +114,9 @@ concern.
    Exit status 1 lists the configuration files that `main` has and `ornl-next`
    does not.
 
-   Add `--remote NAME` if the mantidproject remote is not auto-detected.
+   Add `--remote NAME` if the mantidproject remote is not auto-detected, and
+   `--include SHA` for each sha the user named. With requested shas the status
+   is never 0, because those commits are work to do on their own.
 
 3. Only if step 2 reported differences, find the commits responsible.
 
@@ -94,7 +125,8 @@ concern.
    ```
 
    This lists commits on `main` touching the configuration paths since the last
-   full release, oldest first, already in topological order.
+   full release, oldest first, already in topological order. Repeat the same
+   `--include` arguments here so the requested commits land in that order too.
 
 4. Cherry-pick them in the order listed, resolving conflicts as below.
 
@@ -103,6 +135,9 @@ concern.
    ```sh
    "$SKILL"/scripts/regenerate-outstanding.sh
    ```
+
+   Again with the same `--include` arguments, so the generated table records
+   what was actually carried over.
 
 ## Do not use ancestry to decide what is missing
 

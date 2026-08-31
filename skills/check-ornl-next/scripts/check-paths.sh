@@ -12,6 +12,7 @@ MAIN_REF=""
 ORNL_REF=""
 MODE="diff"
 SINCE=""
+INCLUDES=()
 
 usage() {
     cat <<'USAGE'
@@ -25,6 +26,9 @@ Usage: check-paths.sh [options]
   --log          list upstream commits touching the config paths instead of
                  listing differing files
   --since REF    with --log, start from REF       (default: last full release tag)
+  --include SHA  also treat this commit as work to do, whether or not it
+                 touches a configuration path. Repeatable, and accepts a
+                 comma-separated list.
   --paths        print the path list and exit
   --remotes      print candidate remotes and which one would be used, then exit
   -h, --help     this message
@@ -44,6 +48,12 @@ while [[ $# -gt 0 ]]; do
         --main)    MAIN_REF="$2"; shift 2 ;;
         --ornl)    ORNL_REF="$2"; shift 2 ;;
         --since)   SINCE="$2"; shift 2 ;;
+        --include)
+            IFS=',' read -r -a _inc <<< "$2"
+            for _sha in "${_inc[@]}"; do
+                [[ -n "$_sha" ]] && INCLUDES+=("$_sha")
+            done
+            shift 2 ;;
         --log)     MODE="log"; shift ;;
         --paths)   MODE="paths"; shift ;;
         --remotes) MODE="remotes"; shift ;;
@@ -105,6 +115,36 @@ for ref in "$MAIN_REF" "$ORNL_REF"; do
         exit 2
     }
 done
+
+# Commits the caller named explicitly. They are resolved to full shas here so
+# that later matching is exact, and sanity-checked so a typo fails loudly
+# instead of silently listing nothing.
+resolved_includes=()
+for want in "${INCLUDES[@]+"${INCLUDES[@]}"}"; do
+    full="$(git rev-parse --verify --quiet "${want}^{commit}")" || {
+        echo "cannot resolve requested commit: ${want}" >&2
+        echo "fetch first, or check the sha." >&2
+        exit 2
+    }
+    # A commit named twice, or named by both short and long sha, is one commit.
+    if [[ " ${resolved_includes[*]-} " == *" ${full} "* ]]; then
+        continue
+    fi
+    # Anything not already on main survives the merge-into-main verification as
+    # a difference, which is exactly what that check is there to reject.
+    if ! git merge-base --is-ancestor "$full" "$MAIN_REF" 2>/dev/null; then
+        echo "warning: ${want} is not an ancestor of ${MAIN_REF};" >&2
+        echo "         verifying the result against main will flag it." >&2
+    fi
+    resolved_includes+=("$full")
+done
+INCLUDES=("${resolved_includes[@]+"${resolved_includes[@]}"}")
+
+# Is $1 inside the ${2}..${3} range that --log walks?
+in_range() {
+    git merge-base --is-ancestor "$1" "$3" 2>/dev/null \
+        && ! git merge-base --is-ancestor "$1" "$2" 2>/dev/null
+}
 
 # Build / CI / configuration surface that ornl-next must track from main.
 #
@@ -177,19 +217,55 @@ case "$MODE" in
     log)
         [[ -n "$SINCE" ]] || SINCE="$(last_release_tag)"
         echo "# commits on ${MAIN_REF} touching config paths since ${SINCE}" >&2
-        git log --topo-order --reverse --format='%h %ad %s' --date=short \
-            "${SINCE}..${MAIN_REF}" -- "${PATHS[@]}" | exclude
+        if [[ ${#INCLUDES[@]} -gt 0 ]]; then
+            echo "# plus ${#INCLUDES[@]} explicitly requested commit(s)" >&2
+        fi
+
+        # A requested commit outside the range has no place in that range's
+        # topological order, so it is listed first: it is either older than the
+        # baseline release or reached the repository by some other route.
+        for sha in "${INCLUDES[@]+"${INCLUDES[@]}"}"; do
+            in_range "$sha" "$SINCE" "$MAIN_REF" \
+                || git log -1 --format='%h %ad %s' --date=short "$sha" | exclude
+        done
+
+        # Everything else is one walk of the range, keeping the commits that
+        # touch a configuration path plus the requested ones. Filtering a single
+        # topological walk is what keeps the two kinds in one correct order.
+        wanted=()
+        mapfile -t wanted < <(git rev-list "${SINCE}..${MAIN_REF}" -- "${PATHS[@]}")
+        wanted+=("${INCLUDES[@]+"${INCLUDES[@]}"}")
+        if [[ ${#wanted[@]} -gt 0 ]]; then
+            git log --topo-order --reverse --format='%H %h %ad %s' --date=short \
+                "${SINCE}..${MAIN_REF}" \
+                | awk 'NR == FNR { want[$1]; next }
+                       $1 in want   { sub(/^[^ ]+ /, ""); print }' \
+                      <(printf '%s\n' "${wanted[@]}") - \
+                | exclude
+        fi
         ;;
     diff)
         # Two explicit refs: compares committed trees only, so uncommitted work
         # and untracked files in the working tree cannot create false hits.
         differing="$(git diff --name-only "$ORNL_REF" "$MAIN_REF" -- "${PATHS[@]}" | exclude)"
+        status=0
         if [[ -z "$differing" ]]; then
             echo "In sync: no configuration differences between ${ORNL_REF} and ${MAIN_REF}."
-            exit 0
+        else
+            echo "Configuration files on ${MAIN_REF} not yet reflected in ${ORNL_REF}:"
+            printf '%s\n' "$differing"
+            status=1
         fi
-        echo "Configuration files on ${MAIN_REF} not yet reflected in ${ORNL_REF}:"
-        printf '%s\n' "$differing"
-        exit 1
+        # Requested commits are work to do on their own, so an otherwise clean
+        # path diff still reports a non-zero status.
+        if [[ ${#INCLUDES[@]} -gt 0 ]]; then
+            echo
+            echo "Explicitly requested commits, to carry over regardless of the path diff:"
+            for sha in "${INCLUDES[@]}"; do
+                git log -1 --format='%h %ad %s' --date=short "$sha"
+            done
+            status=1
+        fi
+        exit $status
         ;;
 esac
