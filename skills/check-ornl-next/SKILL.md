@@ -14,6 +14,13 @@ In scope: the build, CI, packaging, linting and repo-level configuration surface
 enumerated in `scripts/check-paths.sh`. That script is the single source of truth
 for the path list -- do not retype the list into a command.
 
+Run every command below from the root of the Mantid checkout. `$SKILL` is this
+skill's own directory, normally `.claude/skills/check-ornl-next`:
+
+```sh
+SKILL=.claude/skills/check-ornl-next
+```
+
 Out of scope: ordinary science-code divergence. `main` is routinely ahead of
 `ornl-next` by dozens of source files; that is expected and is not this skill's
 concern.
@@ -41,7 +48,7 @@ concern.
 2. Ask what differs.
 
    ```sh
-   ./scripts/check-paths.sh
+   "$SKILL"/scripts/check-paths.sh
    ```
 
    Exit status 0 means in sync and **you are done** -- report that and stop.
@@ -53,7 +60,7 @@ concern.
 3. Only if step 2 reported differences, find the commits responsible.
 
    ```sh
-   ./scripts/check-paths.sh --log
+   "$SKILL"/scripts/check-paths.sh --log
    ```
 
    This lists commits on `main` touching the configuration paths since the last
@@ -64,7 +71,7 @@ concern.
 5. Verify (next section). Then regenerate the reference table:
 
    ```sh
-   ./scripts/regenerate-outstanding.sh
+   "$SKILL"/scripts/regenerate-outstanding.sh
    ```
 
 ## Do not use ancestry to decide what is missing
