@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Rewrite reference/outstanding-commits.md from the current state of the repo.
+# Rewrite references/outstanding-commits.md from the current state of the repo.
 #
 # The table is generated, never hand-edited. Anything already reflected in
 # ornl-next, and anything from before the last full release, is left out.
@@ -9,7 +9,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="${HERE}/check-paths.sh"
-OUT="${HERE}/../reference/outstanding-commits.md"
+OUT="${HERE}/../references/outstanding-commits.md"
 
 # Passed straight through to check-paths.sh, which owns remote resolution.
 CHECK_ARGS=()
@@ -31,7 +31,7 @@ Usage: regenerate-outstanding.sh [--remote NAME] [--main REF] [--ornl REF]
   --include SHA  commit to record as work to do whether or not it touches a
                  configuration path. Repeatable, and accepts a comma-separated
                  list.
-  --out FILE     where to write (default: ../reference/outstanding-commits.md)
+  --out FILE     where to write (default: ../references/outstanding-commits.md)
 USAGE
 }
 

@@ -1,7 +1,8 @@
 ---
 name: check-ornl-next
+description: Find and cherry-pick build, CI, and configuration commits from upstream/main onto an ornl-next branch of the mantidproject/mantid repository. Optionally takes commit shas as arguments to carry over as well, whatever they touch. Use when asked to check for ornl-next commits, sync ornl-next with main, reconcile ORNL branch build configuration, or verify that an ornl-next branch still merges cleanly into main.
 license: MIT
-description: Find and cherry-pick build, CI, and configuration commits from upstream/main onto an ornl-next branch of the Mantid repository. Optionally takes commit shas as arguments to carry over as well, whatever they touch. Use when asked to check for ornl-next commits, sync ornl-next with main, reconcile ORNL branch build configuration, or verify that an ornl-next branch still merges cleanly into main.
+compatibility: Requires git and a local clone of mantidproject/mantid
 ---
 
 # Check for ornl-next commits
@@ -15,44 +16,31 @@ In scope: the build, CI, packaging, linting and repo-level configuration surface
 enumerated in `scripts/check-paths.sh`. That script is the single source of truth
 for the path list -- do not retype the list into a command.
 
-Run every command below from the root of the Mantid checkout. `$SKILL` is this
-skill's own directory, normally `.claude/skills/check-ornl-next`:
+Out of scope: ordinary science-code divergence. `main` is routinely ahead of
+`ornl-next` by dozens of source files; that is expected and is not this skill's
+concern.
+
+Paths such as `scripts/check-paths.sh` are relative to this skill's own
+directory. Every command below runs from the root of the Mantid checkout
+instead, so point `$SKILL` at the directory this `SKILL.md` was loaded from --
+it varies by agent and by whether the skill is installed for the user or the
+project:
 
 ```sh
-SKILL=.claude/skills/check-ornl-next
+SKILL=<this skill's directory>
 ```
 
 ## Choosing the git remote
 
-Remote naming is a local convention, so nothing here assumes `upstream`. The
-scripts resolve the remote in this order:
-
-1. `--remote NAME`, if given.
-2. `$ORNL_REMOTE`, if set.
-3. The remote whose fetch URL is `mantidproject/mantid`. Contributor forks are
-   not matched, so a checkout full of collaborator remotes still resolves.
-4. `upstream`, if it exists.
-
-If none apply the scripts stop and list the available remotes rather than
-guessing. To see what would be chosen:
+The scripts resolve the remote themselves, assuming nothing about its name, and
+stop rather than guess when they cannot. This one command reports the choice:
 
 ```sh
 "$SKILL"/scripts/check-paths.sh --remotes
 ```
 
-If the user names a remote, pass it through with `--remote`. If detection fails,
-ask which remote tracks `mantidproject/mantid` rather than picking one.
-
-`--main` and `--ornl` take complete refs and override the remote for that branch,
-which is how you check a local or contributor branch:
-
-```sh
-"$SKILL"/scripts/check-paths.sh --ornl my-reconciliation-branch
-```
-
-Out of scope: ordinary science-code divergence. `main` is routinely ahead of
-`ornl-next` by dozens of source files; that is expected and is not this skill's
-concern.
+Read `references/git-remotes.md` when that fails, when the user names a remote,
+or when you need to check a branch other than the default pair.
 
 ## Explicitly requested commits
 
@@ -97,8 +85,8 @@ the commit or skipping the check.
 
 ## Procedure
 
-1. Fetch first. Every check below is meaningless against stale refs. Use the
-   remote resolved above -- `git remote` if you are unsure which it is.
+1. Fetch first. Every check below is meaningless against stale refs. Fetch the
+   remote the scripts resolve, which `--remotes` above prints.
 
    ```sh
    git fetch <remote>
@@ -188,9 +176,12 @@ git worktree remove ../verify-ornl
 An empty `git diff --name-only upstream/main` is the pass condition. Always
 remove the worktree, including after a failure.
 
-## Reference
+## References
 
-`reference/outstanding-commits.md` records the last computed state: baseline
+`references/git-remotes.md` covers remote resolution in full: the order the
+scripts try, and the `--remote`, `--main` and `--ornl` overrides.
+
+`references/outstanding-commits.md` records the last computed state: baseline
 release, both branch tips, and any outstanding commits. It is generated output --
 read it for context, regenerate it rather than editing it, and distrust it if
 its date is old.
