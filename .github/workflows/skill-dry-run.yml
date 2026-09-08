@@ -1,0 +1,23 @@
+name: Skill Dry Run
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show GitHub CLI version
+        run: gh --version
+
+      - name: Verify gh skill is available
+        run: gh skill --help
+
+      - name: Validate skills with gh skill publish --dry-run
+        run: gh skill publish --dry-run
