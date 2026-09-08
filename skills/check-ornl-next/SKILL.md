@@ -2,7 +2,7 @@
 name: check-ornl-next
 description: Find and cherry-pick build, CI, and configuration commits from upstream/main onto an ornl-next branch of the mantidproject/mantid repository. Optionally takes commit shas as arguments to carry over as well, whatever they touch. Use when asked to check for ornl-next commits, sync ornl-next with main, reconcile ORNL branch build configuration, or verify that an ornl-next branch still merges cleanly into main.
 license: MIT
-compatibility: Requires git and a local clone of mantidproject/mantid
+compatibility: Requires git and a local clone of mantidproject/mantid. The scripts need an unsandboxed shell; an agent that sandboxes Bash by default must disable it.
 ---
 
 # Check for ornl-next commits
@@ -29,6 +29,25 @@ project:
 ```sh
 SKILL=<this skill's directory>
 ```
+
+## The scripts need an unsandboxed shell
+
+Both scripts shell out to `git`, so an agent that sandboxes Bash by default must
+disable the sandbox for every command in this skill -- in Claude Code, pass
+`dangerouslyDisableSandbox: true` per call, or `/sandbox` to turn it off for the
+session.
+
+On some hosts the sandbox cannot start at all, and then *every* command fails
+identically -- `echo hello` included -- with:
+
+    apply-seccomp: write /proc/self/setgroups (nested userns is
+    capability-restricted; caller must provide CAP_SYS_ADMIN): Permission denied
+
+That is the sandbox failing before the script is reached, not a fault in the
+script or its arguments. Do not debug the script or retry it with different
+arguments; run it unsandboxed instead. `echo hello` is the cheap test that tells
+the two apart. Ubuntu 24.04's `kernel.apparmor_restrict_unprivileged_userns=1`
+is one known cause.
 
 ## Choosing the git remote
 
