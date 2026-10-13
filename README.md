@@ -9,6 +9,7 @@ repository. They follow the [Agent Skills](https://agentskills.io) convention, s
 | skill | what it does |
 |-------|--------------|
 | [`check-ornl-next`](skills/check-ornl-next/) | Find and cherry-pick build/CI/configuration commits from main onto an `ornl-next` branch, then verify the branch still merges cleanly into main. |
+| [`tighten`](skills/tighten/) | Comb through a diff and cut unnecessary line count, comment noise and test bloat, without changing behaviour or coverage. |
 
 ## Installing
 
